@@ -1,2 +1,3 @@
 python-telegram-bot>=21.6,<23
 pymongo[srv]>=4.8,<5
+python-dotenv>=1.0,<2
