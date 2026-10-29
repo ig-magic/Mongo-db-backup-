@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from bson.json_util import CANONICAL_JSON_OPTIONS, dumps as bson_dumps
+from dotenv import load_dotenv
 from pymongo import MongoClient
 from telegram import Update
 from telegram.constants import ChatType
@@ -35,6 +36,8 @@ from telegram.ext import (
     filters,
 )
 from telegram.request import HTTPXRequest
+
+load_dotenv()  # Optional local .env; Render dashboard variables take precedence.
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 ADMIN_IDS = {
@@ -156,17 +159,37 @@ def make_backup(uri: str, workdir: Path, report_progress) -> tuple[Path, Path]:
     export_readable_json(uri, readable, report_progress)
 
     report_progress(68, "Native restorable mongodump chal raha hai (is stage ka percent approximate hai)")
-    result = subprocess.run(
-        ["mongodump", "--uri", uri, "--archive", str(archive), "--gzip"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=60 * 60,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["mongodump", "--uri", uri, "--archive", str(archive), "--gzip"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60 * 60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Native dump 60 minute limit par timeout hua; Render logs/duration check karein.")
+
     if result.returncode != 0:
-        # Never return a raw tool error: it could contain connection details.
-        raise RuntimeError("mongodump fail hua. URI/permissions/network aur Render logs check karein.")
+        # Keep diagnostic details in Render logs, but scrub the submitted URI first.
+        diagnostic = result.stderr or "No stderr was returned by mongodump."
+        diagnostic = diagnostic.replace(uri, "<MongoDB URI redacted>")
+        diagnostic = re.sub(
+            r"mongodb(?:\+srv)?://[^\s@]+@",
+            "mongodb://<credentials-redacted>@",
+            diagnostic,
+            flags=re.IGNORECASE,
+        )
+        print(
+            f"[backup] mongodump exit code={result.returncode}; sanitized stderr follows:\n"
+            f"{diagnostic[-6000:]}",
+            flush=True,
+        )
+        raise RuntimeError(
+            f"Native dump command failed (exit code {result.returncode}); "
+            "Render runtime logs mein sanitized mongodump detail dekhein."
+        )
 
     report_progress(84, "Restorable archive tayyar; Telegram ke liye file parts ban rahe hain")
     return archive, readable
