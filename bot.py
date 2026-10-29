@@ -161,7 +161,9 @@ def make_backup(uri: str, workdir: Path, report_progress) -> tuple[Path, Path]:
     report_progress(68, "Native restorable mongodump chal raha hai (is stage ka percent approximate hai)")
     try:
         result = subprocess.run(
-            ["mongodump", "--uri", uri, "--archive", str(archive), "--gzip"],
+            # --archive takes an optional filename; use --archive=<path> so
+            # mongodump does not parse the filename as another positional URI.
+            ["mongodump", f"--uri={uri}", f"--archive={archive}", "--gzip"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
